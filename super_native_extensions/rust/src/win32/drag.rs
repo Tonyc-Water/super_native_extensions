@@ -61,6 +61,7 @@ pub struct DropSource {
     last_reported_location: RefCell<Point>,
     session_id: DragSessionId,
     cancelled: Rc<Cell<bool>>,
+    call_count: Cell<u32>,
 }
 
 #[allow(non_snake_case)]
@@ -75,6 +76,7 @@ impl DropSource {
             session_id,
             last_reported_location: RefCell::new(Point::default()),
             cancelled,
+            call_count: Cell::new(0),
         }
         .into()
     }
@@ -87,11 +89,20 @@ impl IDropSource_Impl for DropSource {
         fescapepressed: BOOL,
         grfkeystate: MODIFIERKEYS_FLAGS,
     ) -> windows::core::HRESULT {
+        let count = self.call_count.get();
+        self.call_count.set(count + 1);
         if fescapepressed.as_bool() {
             self.cancelled.replace(true);
             DRAGDROP_S_CANCEL
         } else if grfkeystate.0 & MK_LBUTTON.0 == 0 {
-            DRAGDROP_S_DROP
+            // Skip the first few calls where button state may be stale,
+            // especially when IDragSourceHelper setup was skipped and
+            // DoDragDrop entered the loop before input was captured.
+            if count < 2 {
+                S_OK
+            } else {
+                DRAGDROP_S_DROP
+            }
         } else {
             let mut cursor_pos = POINT::default();
             unsafe { GetCursorPos(&mut cursor_pos as *mut _).ok_log() };

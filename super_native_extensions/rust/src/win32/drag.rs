@@ -240,12 +240,18 @@ impl PlatformDragContext {
         let cancelled = Rc::new(Cell::new(false));
         let drop_source = DropSource::create(self.weak_self.clone(), session_id, cancelled.clone());
         let mut effects_out = DROPEFFECT_NONE;
-        unsafe {
-            let _ = DoDragDrop(
+        let drag_result = unsafe {
+            DoDragDrop(
                 &data_object,
                 &drop_source,
                 DROPEFFECT(allowed_effects),
                 &mut effects_out as *mut DROPEFFECT,
+            )
+        };
+        if drag_result.is_err() {
+            eprintln!(
+                "DoDragDrop failed: {} (0x{:08X})",
+                drag_result, drag_result.0 as u32
             );
         }
 

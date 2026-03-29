@@ -240,6 +240,7 @@ impl PlatformDragContext {
         let cancelled = Rc::new(Cell::new(false));
         let drop_source = DropSource::create(self.weak_self.clone(), session_id, cancelled.clone());
         let mut effects_out = DROPEFFECT_NONE;
+        eprintln!("[DoDragDrop] calling...");
         let drag_result = unsafe {
             DoDragDrop(
                 &data_object,
@@ -248,12 +249,10 @@ impl PlatformDragContext {
                 &mut effects_out as *mut DROPEFFECT,
             )
         };
-        if drag_result.is_err() {
-            eprintln!(
-                "DoDragDrop failed: {} (0x{:08X})",
-                drag_result, drag_result.0 as u32
-            );
-        }
+        eprintln!(
+            "[DoDragDrop] returned: 0x{:08X}, effects: 0x{:08X}",
+            drag_result.0 as u32, effects_out.0 as u32
+        );
 
         // Data source might be still in use through IDataObjectAsyncCapability,
         // but we want to let user know that drag session ended immediately.

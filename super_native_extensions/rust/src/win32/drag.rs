@@ -187,28 +187,44 @@ impl PlatformDragContext {
         let drag_image = drag_image.with_shadow(10);
 
         let data_object = DataObject::create(providers);
-        let helper: IDragSourceHelper = create_instance(&CLSID_DragDropHelper)?;
-        let hbitmap = image_data_to_hbitmap(&drag_image.image_data)?;
-        let device_pixel_ratio = drag_image.image_data.device_pixel_ratio.unwrap_or(1.0);
-        let point_in_rect = Point {
-            x: (request.position.x - drag_image.rect.x) * device_pixel_ratio,
-            y: (request.position.y - drag_image.rect.y) * device_pixel_ratio,
-        };
 
-        let mut image = SHDRAGIMAGE {
-            sizeDragImage: SIZE {
-                cx: drag_image.image_data.width,
-                cy: drag_image.image_data.height,
-            },
-            ptOffset: POINT {
-                x: point_in_rect.x as i32,
-                y: point_in_rect.y as i32,
-            },
-            hbmpDragImage: hbitmap,
-            crColorKey: COLORREF(0xFFFFFFFF),
-        };
-        unsafe {
-            helper.InitializeFromBitmap(&mut image as *mut _, &data_object)?;
+        // Drag image setup is cosmetic — if it fails (e.g. E_NOINTERFACE when
+        // COM state is degraded), proceed with the drag anyway using the
+        // default OS cursor instead of aborting the entire operation.
+        let helper_result: windows::core::Result<IDragSourceHelper> =
+            create_instance(&CLSID_DragDropHelper);
+        if let Ok(ref helper) = helper_result {
+            if let Ok(hbitmap) = image_data_to_hbitmap(&drag_image.image_data) {
+                let device_pixel_ratio =
+                    drag_image.image_data.device_pixel_ratio.unwrap_or(1.0);
+                let point_in_rect = Point {
+                    x: (request.position.x - drag_image.rect.x) * device_pixel_ratio,
+                    y: (request.position.y - drag_image.rect.y) * device_pixel_ratio,
+                };
+
+                let mut image = SHDRAGIMAGE {
+                    sizeDragImage: SIZE {
+                        cx: drag_image.image_data.width,
+                        cy: drag_image.image_data.height,
+                    },
+                    ptOffset: POINT {
+                        x: point_in_rect.x as i32,
+                        y: point_in_rect.y as i32,
+                    },
+                    hbmpDragImage: hbitmap,
+                    crColorKey: COLORREF(0xFFFFFFFF),
+                };
+                unsafe {
+                    helper
+                        .InitializeFromBitmap(&mut image as *mut _, &data_object)
+                        .ok_log();
+                }
+            }
+        } else {
+            eprintln!(
+                "IDragSourceHelper creation failed ({}), proceeding without drag image",
+                helper_result.unwrap_err()
+            );
         }
 
         let mut allowed_effects: u32 = 0;

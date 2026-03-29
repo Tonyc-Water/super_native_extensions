@@ -478,17 +478,20 @@ impl IDropTarget_Impl for DropTarget {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
+        eprintln!("[DropTarget] DragEnter called");
         if let Some(drop_target_helper) = &self.drop_target_helper {
             unsafe {
-                drop_target_helper
+                let res = drop_target_helper
                     .DragEnter(
                         self.hwnd,
                         pdataobj.unwrap(),
                         pt as *const POINTL as *const _,
                         *pdweffect,
-                    )
-                    .ok(); // Logging the error here is pretty useless since we have
-                           // no control over either the data object or drop target helper.
+                    );
+                if res.is_err() {
+                    eprintln!("[DropTarget] DragEnter helper failed: {res:?}");
+                }
+                res.ok();
             }
         }
         if let Some(context) = self.platform_context.upgrade() {

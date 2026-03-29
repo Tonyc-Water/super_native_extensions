@@ -26,7 +26,7 @@ use windows::{
         },
         UI::{
             Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
-            Shell::{CLSID_DragDropHelper, IDataObjectAsyncCapability, IDropTargetHelper},
+            Shell::IDataObjectAsyncCapability,
             WindowsAndMessaging::{EVENT_OBJECT_DESTROY, OBJID_WINDOW, WINEVENT_INCONTEXT},
         },
     },
@@ -45,7 +45,7 @@ use crate::{
 };
 
 use super::{
-    common::{create_instance, get_dpi_for_window},
+    common::get_dpi_for_window,
     drag_common::DropOperationExt,
     PlatformDataReader,
 };
@@ -456,7 +456,6 @@ impl Drop for PlatformDropContext {
 struct DropTarget {
     hwnd: HWND,
     platform_context: Weak<PlatformDropContext>,
-    drop_target_helper: RefCell<Option<IDropTargetHelper>>,
 }
 
 impl DropTarget {
@@ -464,14 +463,7 @@ impl DropTarget {
         Self {
             hwnd,
             platform_context,
-            drop_target_helper: RefCell::new(create_instance(&CLSID_DragDropHelper).ok_log()),
         }
-    }
-
-    /// Disable the helper if a call to it fails, so subsequent
-    /// drag events are not blocked by a broken COM object.
-    fn disable_helper(&self) {
-        self.drop_target_helper.replace(None);
     }
 }
 
@@ -484,21 +476,6 @@ impl IDropTarget_Impl for DropTarget {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        if let Some(ref helper) = *self.drop_target_helper.borrow() {
-            unsafe {
-                if helper
-                    .DragEnter(
-                        self.hwnd,
-                        pdataobj.unwrap(),
-                        pt as *const POINTL as *const _,
-                        *pdweffect,
-                    )
-                    .is_err()
-                {
-                    self.disable_helper();
-                }
-            }
-        }
         if let Some(context) = self.platform_context.upgrade() {
             context
                 .on_drag_enter(pdataobj, grfkeystate, pt, pdweffect)
@@ -513,16 +490,6 @@ impl IDropTarget_Impl for DropTarget {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        if let Some(ref helper) = *self.drop_target_helper.borrow() {
-            unsafe {
-                if helper
-                    .DragOver(pt as *const POINTL as *const _, *pdweffect)
-                    .is_err()
-                {
-                    self.disable_helper();
-                }
-            }
-        }
         if let Some(context) = self.platform_context.upgrade() {
             context.on_drag_over(grfkeystate, pt, pdweffect).ok_log();
         }
@@ -530,13 +497,6 @@ impl IDropTarget_Impl for DropTarget {
     }
 
     fn DragLeave(&self) -> windows::core::Result<()> {
-        if let Some(ref helper) = *self.drop_target_helper.borrow() {
-            unsafe {
-                if helper.DragLeave().is_err() {
-                    self.disable_helper();
-                }
-            }
-        }
         if let Some(context) = self.platform_context.upgrade() {
             context.on_drag_leave().ok_log();
         }
@@ -550,20 +510,6 @@ impl IDropTarget_Impl for DropTarget {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        if let Some(ref helper) = *self.drop_target_helper.borrow() {
-            unsafe {
-                if helper
-                    .Drop(
-                        pdataobj.unwrap(),
-                        pt as *const POINTL as *const _,
-                        *pdweffect,
-                    )
-                    .is_err()
-                {
-                    self.disable_helper();
-                }
-            }
-        }
         if let Some(context) = self.platform_context.upgrade() {
             context
                 .on_drop(pdataobj, grfkeystate, pt, pdweffect)

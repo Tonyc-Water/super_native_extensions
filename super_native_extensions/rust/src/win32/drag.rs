@@ -15,7 +15,10 @@ use windows::{
             POINT, SIZE, S_OK,
         },
         System::{
-            Ole::{DoDragDrop, IDropSource, IDropSource_Impl, DROPEFFECT, DROPEFFECT_NONE},
+            Ole::{
+                DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize,
+                DROPEFFECT, DROPEFFECT_NONE,
+            },
             SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
         },
         UI::{
@@ -155,7 +158,22 @@ impl PlatformDragContext {
         RunLoop::current()
             .schedule_next(move || {
                 if let Some(this) = weak_self.upgrade() {
-                    this._start_drag(request, providers, session_id).ok_log();
+                    let result = this._start_drag(request, providers, session_id);
+                    if let Err(ref err) = result {
+                        let err_str = format!("{err}");
+                        // E_NOINTERFACE (0x80004002) indicates corrupted COM
+                        // state. Reinitialize OLE so the next drag can succeed.
+                        if err_str.contains("0x80004002") {
+                            eprintln!(
+                                "Drag failed with E_NOINTERFACE — reinitializing OLE for recovery"
+                            );
+                            unsafe {
+                                OleUninitialize();
+                                OleInitialize(None).ok_log();
+                            }
+                        }
+                    }
+                    result.ok_log();
                 }
             })
             .detach();

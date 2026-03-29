@@ -456,7 +456,7 @@ impl Drop for PlatformDropContext {
 struct DropTarget {
     hwnd: HWND,
     platform_context: Weak<PlatformDropContext>,
-    drop_target_helper: Option<IDropTargetHelper>,
+    drop_target_helper: RefCell<Option<IDropTargetHelper>>,
 }
 
 impl DropTarget {
@@ -464,8 +464,14 @@ impl DropTarget {
         Self {
             hwnd,
             platform_context,
-            drop_target_helper: create_instance(&CLSID_DragDropHelper).ok_log(),
+            drop_target_helper: RefCell::new(create_instance(&CLSID_DragDropHelper).ok_log()),
         }
+    }
+
+    /// Disable the helper if a call to it fails, so subsequent
+    /// drag events are not blocked by a broken COM object.
+    fn disable_helper(&self) {
+        self.drop_target_helper.replace(None);
     }
 }
 
@@ -478,20 +484,19 @@ impl IDropTarget_Impl for DropTarget {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        eprintln!("[DropTarget] DragEnter called");
-        if let Some(drop_target_helper) = &self.drop_target_helper {
+        if let Some(ref helper) = *self.drop_target_helper.borrow() {
             unsafe {
-                let res = drop_target_helper
+                if helper
                     .DragEnter(
                         self.hwnd,
                         pdataobj.unwrap(),
                         pt as *const POINTL as *const _,
                         *pdweffect,
-                    );
-                if res.is_err() {
-                    eprintln!("[DropTarget] DragEnter helper failed: {res:?}");
+                    )
+                    .is_err()
+                {
+                    self.disable_helper();
                 }
-                res.ok();
             }
         }
         if let Some(context) = self.platform_context.upgrade() {
@@ -508,11 +513,14 @@ impl IDropTarget_Impl for DropTarget {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        if let Some(drop_target_helper) = &self.drop_target_helper {
+        if let Some(ref helper) = *self.drop_target_helper.borrow() {
             unsafe {
-                drop_target_helper
+                if helper
                     .DragOver(pt as *const POINTL as *const _, *pdweffect)
-                    .ok();
+                    .is_err()
+                {
+                    self.disable_helper();
+                }
             }
         }
         if let Some(context) = self.platform_context.upgrade() {
@@ -522,9 +530,11 @@ impl IDropTarget_Impl for DropTarget {
     }
 
     fn DragLeave(&self) -> windows::core::Result<()> {
-        if let Some(drop_target_helper) = &self.drop_target_helper {
+        if let Some(ref helper) = *self.drop_target_helper.borrow() {
             unsafe {
-                drop_target_helper.DragLeave().ok();
+                if helper.DragLeave().is_err() {
+                    self.disable_helper();
+                }
             }
         }
         if let Some(context) = self.platform_context.upgrade() {
@@ -540,15 +550,18 @@ impl IDropTarget_Impl for DropTarget {
         pt: &POINTL,
         pdweffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        if let Some(drop_target_helper) = &self.drop_target_helper {
+        if let Some(ref helper) = *self.drop_target_helper.borrow() {
             unsafe {
-                drop_target_helper
+                if helper
                     .Drop(
                         pdataobj.unwrap(),
                         pt as *const POINTL as *const _,
                         *pdweffect,
                     )
-                    .ok();
+                    .is_err()
+                {
+                    self.disable_helper();
+                }
             }
         }
         if let Some(context) = self.platform_context.upgrade() {
